@@ -1,0 +1,28 @@
+[connection]
+id={{ wifi_name }}
+uuid=49ead8bb-ab26-4194-a84a-4902d980dcbb
+type=wifi
+interface-name=wlan0
+permissions=
+timestamp=1640523173
+
+[wifi]
+mac-address-blacklist=
+mode=infrastructure
+seen-bssids=
+ssid={{ wifi_name }}
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk={{ wifi_password }}
+
+[ipv4]
+dns-search=
+method=auto
+
+[ipv6]
+addr-gen-mode=stable-privacy
+dns-search=
+method=disabled
+
+[proxy]

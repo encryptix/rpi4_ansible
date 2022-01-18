@@ -1,0 +1,7 @@
+- name: "Docker Setup"
+  hosts: all
+  become: yes
+
+  roles:
+    # $ ansible-galaxy install --roles-path ~/ansible-roles geerlingguy.docker_arm
+    - { role: geerlingguy.docker_arm, tags: docker }

@@ -1,0 +1,262 @@
+- name: "Initial HA Setup"
+  hosts: all
+  become: yes
+
+  vars:
+    files_dir: files/initial_home_assistant
+    templates_dir: templates/initial_home_assistant
+    deb_files_dir: /etc/deb-files
+    wifi_ssid: Set_Me_Name
+    wifi_password: Set_Me_Pass
+    network_manager_conf_d_dir: /etc/NetworkManager/conf.d
+    network_manager_connections_dir: /etc/NetworkManager/system-connections
+ 
+  tasks:
+  - debug:
+      msg: "Files dir in home_assistant is {{ files_dir }}. Templates dir is {{ templates_dir }}"
+
+  # FUTURE TODO: Setup a HA user
+
+  - name: Install ha dependencies packages
+    package:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - jq
+      - wget
+      - curl
+      - udisks2
+      - libglib2.0-bin
+      - dbus
+      - apparmor
+
+  - name: Adding lsm=apparmor to boot parameters
+    lineinfile:
+      path: /boot/cmdline.txt
+      state: present
+      regexp: '^((?!.*lsm=apparmor).*console.*)$'
+      line: '\1 lsm=apparmor'
+      backrefs: yes
+    notify:
+    - Reboot Pi
+
+  # Configure Networkmanager
+  - name: "Pre create network manager dirs"
+    become: yes
+    become_user: root
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0744'
+    with_items:
+      - "{{ network_manager_conf_d_dir }}"
+      - "{{ network_manager_connections_dir }}"
+
+  - name: NetworkManager config file to disable random mac
+    become: yes
+    become_user: root
+    template:
+      src: "{{ files_dir }}/100-disable-wifi-mac-randomization.conf"
+      dest: "{{ network_manager_conf_d_dir }}/100-disable-wifi-mac-randomization.conf"
+      owner: root
+      group: root
+      mode: '0644'
+
+  - name: General NetworkManager config file (HA will override this) Do I even need this version?
+    become: yes
+    become_user: root
+    template:
+      src: "{{ files_dir }}/NetworkManager.conf"
+      dest: /etc/NetworkManager/NetworkManager.conf
+      owner: root
+      group: root
+      mode: '0644'
+
+  - name: Setup Wifi Connection details for network-manager
+    become: yes
+    become_user: root
+    template:
+      src: "{{ templates_dir }}/Wifi.nmconnection.j2"
+      dest: "{{network_manager_connections_dir}}/{{ wifi_ssid | regex_replace(' ', '_') }}.nmconnection"
+      owner: root
+      group: root
+      mode: 0600
+    vars:
+      wifi_name: "{{ wifi_ssid }}"
+      wifi_pass: "{{ wifi_password }}"
+ 
+  - pause:
+      prompt: "Configure Networkmanager wifi after package install)"
+
+  # This starts it too so have to be careful
+  - name: Install network manager
+    package:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - network-manager
+      - network-manager-gnome
+    ignore_errors: yes
+    notify:
+    - Reboot Pi
+
+  - name: Sleep for 30 seconds and continue with play
+    wait_for:
+      timeout: 30
+  
+  - name: Install network manager again (backup call)
+    package:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - network-manager
+      - network-manager-gnome
+    ignore_errors: yes
+    notify:
+    - Reboot Pi
+
+  # This was a systemd disable of ModemManager but its not installed at the started
+  # Instead of disabling it if its installed, its ok to just ensure its uninstalled
+  - name: Uninstall some packages
+    package:
+      name: "{{ item }}"
+      state: absent
+    with_items:
+      # HA says that this conflicts with it, it is for gsm network.
+      - modemmanager
+
+   # TODO if ethernet, skip WIFI but still disable ipv6
+
+  - name: Disable dhcpd for NetworkManager to take control
+    become: yes
+    become_user: root
+    systemd:
+      name: dhcpcd.service
+      enabled: no
+    notify:
+    - Reboot Pi
+
+  - name: Enable NetworkManager
+    become: yes
+    become_user: root
+    systemd:
+      name: NetworkManager
+      enabled: yes
+    notify:
+    - Reboot Pi
+
+  - name: Flush Handlers to reboot mid play as required
+    meta: flush_handlers
+
+  - name: "Creates deb dir {{ deb_files_dir }}"
+    file:
+      path: "{{ deb_files_dir }}"
+      state: directory
+
+  # https://github.com/home-assistant/os-agent/releases/latest/
+  - name: Copy os-agent deb 1.2.2
+    copy:
+      src: "{{ item }}"
+      dest: "{{ deb_files_dir }}"
+    with_fileglob:
+      - "{{ files_dir }}/os-agent_1.2.2_linux_armv7.deb"
+
+  # https://github.com/home-assistant/supervised-installer/releases/latest
+  - name: Copy supervisor deb 1.0.2
+    copy:
+      src: "{{ item }}"
+      dest: "{{ deb_files_dir }}"
+    with_fileglob:
+      - "{{ files_dir }}/homeassistant-supervised_1.0.2.deb"
+   
+  - name: Install os-agent
+    become: yes
+    become_user: root  
+    apt:
+      deb: "{{ deb_files_dir }}/os-agent_1.2.2_linux_armv7.deb"
+    register: ha_os_agent_install
+ 
+  - debug:
+      msg: "{{ha_os_agent_install.stdout_lines}}"
+
+  # Current rpm install fails. 
+  # Manually install rpm with dpkg and then manually run postinst script
+  # Save this file (https://raw.githubusercontent.com/home-assistant/supervised-installer/1.0.2/homeassistant-supervised/DEBIAN/postinst) after putting some sleeps in to wait for network/dns for docker to run
+  # /etc/hassio.json had OK in for machine type...Should have been raspberrypi4 so I updated that.
+  - pause:
+      prompt: "Manually install {{ deb_files_dir }}/homeassistant-supervised_1.0.2.deb. Requires CLI and manual run of post script. Save https://raw.githubusercontent.com/home-assistant/supervised-installer/1.0.2/homeassistant-supervised/DEBIAN/postinst and add a sleep of 90s in after ;install supervisor docker container'. Sudo run it. Wait for sudo journalctl -f -u hassio-supervisor.service to settle. If there are errors intervention is required."
+
+  # Maybe in the future it just works and the above isnt needed..
+  #- name: Install HA Supervisor
+  #  become: yes
+  #  become_user: root  
+  #  apt:
+  #    deb: https://github.com/home-assistant/supervised-installer/releases/latest/download/homeassistant-supervised.deb
+  #  register: ha_supervisor_install
+
+  #- debug:
+  #    msg: "{{ha_supervisor_install.stdout_lines}}"
+  
+  # Need to be careful to delete the image in docker ps -a or the new params wont take hold. This is an issue if the params were wrong...
+  # sudo service hassio-supervisor stop
+  # docker stop hassio_supervisor
+  # docker rm hassio_supervisor 
+  # sudo service hassio-supervisor start
+  - name: "Ensure /etc/hassio.json has correct machine type {{ ha_machine_type }}. Read comments at this task upon failure."
+    lineinfile:
+      name: /etc/hassio.json
+      line: "    \"machine\": \"{{ ha_machine_type }}\","
+      state: present
+    check_mode: yes
+    register: hassio_conf_check
+    failed_when: (hassio_conf_check is changed) or (hassio_conf_check is failed)
+
+
+  # https://github.com/JJFourie/HomeAssistant-PulseAudio-Disable/blob/main/pa-suspend.sh
+  # https://github.com/JJFourie/HomeAssistant-PulseAudio-Disable
+  # https://community.home-assistant.io/t/solved-hassio-audio-is-in-boot-loop-and-spams-my-syslog-with-errors/282538/105
+  - name: Address PulseAudio in audio container having high CPU
+    block:
+      - name: Create Scripts dir
+        file:
+          path: /home/pi/Scripts
+          state: directory
+          mode: '0744'
+          owner: pi
+          group: pi
+
+      - name: Copy pa-suspend script file
+        copy:
+          src: "{{ files_dir }}/pa-suspend.sh"
+          dest: /home/pi/Scripts/pa-suspend.sh
+          owner: pi
+          group: pi
+          mode: '0744'
+
+      - name: Copy pa-suspend service file
+        copy:
+          src: "{{ files_dir }}/pa-suspend.service"
+          dest: /etc/systemd/system/pa-suspend.service
+          owner: root
+          group: root
+          mode: '0644'
+      # TODO, I think the script needs some work to avoid stopping in certain error states
+      - name: Enable service pa-suspend
+        become: yes
+        become_user: root
+        systemd:
+          name: pa-suspend
+          enabled: yes
+          state: started
+      
+      - name: Collect facts about system services
+        service_facts:
+        register: services_state
+        no_log: true
+        
+      - debug:
+          msg: "{{ services_state['ansible_facts']['services']['pa-suspend.service'] }}"
+          
+  handlers:
+  - name: Reboot Pi
+    reboot:

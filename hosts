@@ -1,0 +1,2 @@
+[rpi4]
+XXX.XXX.XXX.XXX ansible_connection=ssh ansible_user=pi

@@ -1,0 +1,135 @@
+- name: "Initial RPI OS Setup"
+  hosts: all
+  become: yes
+  become_user: root
+
+  vars:
+    files_dir: files/initial_rpi_os_setup
+    templates_dir: templates/initial_rpi_os_setup
+
+  tasks:
+  - debug:
+      msg: "Files dir in ha_os_setup is {{ files_dir }}. Templates dir is {{ templates_dir}}"
+
+  # https://jamesachambers.com/raspberry-pi-4-bootloader-firmware-updating-recovery-guide/
+  - name: Setup firmware config file for stable
+    template:
+      src: "{{ files_dir }}/rpi-eeprom-update"
+      dest: /etc/default/rpi-eeprom-update
+      owner: root
+      group: root
+      mode: '0644'
+
+  - name: Run update firmware   
+    command: 'rpi-eeprom-update -a'
+    register: firmware_output
+    changed_when: "'available' in firmware_output.stdout"
+    notify:
+    - Reboot Pi
+
+  - debug:
+      msg: "{{firmware_output.stdout_lines}}"
+
+  - name: "Update hostname to {{ rpi_hostname }}"
+    hostname: 
+      name: "{{ rpi_hostname }}"
+      use: debian
+    notify:
+    - Reboot Pi
+
+  - name: Update hosts file
+    replace:
+      path: /etc/hosts
+      regexp: '(\s+)raspberrypi(\s+.*)?$'
+      replace: '\1{{ rpi_hostname }}\2'
+    notify:
+    - Reboot Pi
+
+   # Future TODO: Check 64 bit RPI OS does not have VNC installed and install   
+  - name: Set headless VNC size
+    template:
+      src: "{{ templates_dir }}/headless_vnc_resolution.j2"
+      dest: /etc/xdg/autostart/vnc_xrandr.desktop
+      owner: root
+      group: root
+      mode: '0644'
+    vars:
+      vnc_size: "{{ vnc_headless_size }}"
+
+  - name: Enable VNC
+    systemd:
+      name: vncserver-x11-serviced.service
+      enabled: yes
+      state: started
+
+  - name: install english ie locale
+    locale_gen:
+      name: "{{ locale }}"
+      state: present
+
+  - name: Get current locale
+    set_fact:
+      current_locale: "{{ ansible_env['LC_ALL'] }}"
+
+  - name: "Set locale Replacing: {{ current_locale }}"
+    command: "update-locale {{ locale }} UTF-8"
+    register: locale
+    when: current_locale != locale
+    #notify:
+    #- Reboot Pi
+
+  - name: Setup /etc/timezone
+    template:
+      src: "{{ files_dir }}/timezone"
+      dest: /etc/timezone
+      owner: root
+      group: root
+      mode: '0644'
+
+  - name: LXDE file for clock to have seconds
+    template:
+      src: "{{ files_dir }}/lxde_panel"
+      dest: /home/pi/.config/lxpanel/LXDE-pi/panels/panel
+      owner: pi
+      group: pi
+      mode: '0644'
+
+  - name: Update Apt Cache
+    apt: update_cache=yes
+
+  - name: Safe Apt Upgrade
+    apt: upgrade=safe
+
+  - name: Upgrade Dist
+    apt: upgrade=dist
+    register: apt_dist_run
+
+  - debug: var=apt_dist_run
+
+  - name: Install some packages
+    package:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - vim
+      - screen
+      - fake-hwclock
+      - htop
+
+  - name: apt autoremove
+    apt: autoremove=yes
+
+  - name: Update screen settings
+    blockinfile:
+      path: /etc/screenrc
+      block: |
+            termcapinfo xterm* ti@:te@
+            startup_message off
+            shell -/bin/bash
+
+  - name: Flush Handlers to reboot if required
+    meta: flush_handlers
+
+  handlers:
+  - name: Reboot Pi
+    reboot:

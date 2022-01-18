@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=vnc_xrandr
+Comment=Set resolution for VNC
+NoDisplay=true
+Exec=sh -c "if ! (xrandr | grep -q -w connected) ; then /usr/bin/xrandr --fb {{ vnc_size }} ; fi"

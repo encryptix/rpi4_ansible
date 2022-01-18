@@ -1,0 +1,121 @@
+# ansible-playbook home_assistant_02.yml -i hosts
+- name: Configure HA Install
+  hosts: all
+  become: yes
+  become_user: root
+
+  vars:
+    files_dir: files/home_assistant
+    ha_dir: /usr/share/hassio/homeassistant
+    git_remote_url: 'git@github.com:encryptix/homeassistant_config.git'
+
+  tasks:
+  # Hacs install
+  - name: Check for HACS
+    stat:
+      path: "{{ ha_dir }}/custom_components/hacs/"
+    register: hacs_dir
+
+  - name: Install HACS
+    block:
+    - name: Download hacs script
+      shell:
+        cmd: wget -O - https://get.hacs.xyz | bash -
+      register: hacs_install_output
+    
+    - name: Display hacs install
+      debug:
+        msg: "{{ hacs_install_output.stdout_lines }}"
+    when: not hacs_dir.stat.exists
+
+
+  # Setup git & repo
+  - name: Install git
+    package:
+      name: git
+      state: present
+
+  - name: Create git ssh dir
+    file:
+      path: "{{ ha_dir }}/.ssh"
+      state: directory
+      mode: '0744'
+
+  - name: Copy .ssh/ha-github.pub
+    copy:
+      src: "{{ files_dir }}/ha-github.pub"
+      dest: "{{ ha_dir }}/.ssh/ha-github.pub"
+      owner: root
+      group: root
+      mode: '0600'
+
+  - name: Manually setup secrets
+    pause:
+      prompt: "Yo secrets (private key to {{ ha_dir }}/.ssh/). secrets.yaml to {{ ha_dir }}"
+
+
+  # ansible-galaxy collection install community.general
+  - name: Check for git repo
+    stat:
+      path: "{{ ha_dir }}/.git/"
+    register: git_dir
+
+  - name: Init git repo and set configs
+    block:
+      - name: Git init
+        command:
+          cmd: 'git init .'
+          chdir: "{{ ha_dir }}"
+        when: not git_dir.stat.exists
+        
+      - name: Setup repo email
+        community.general.git_config:
+          scope: local
+          repo: "{{ ha_dir }}"
+          name: user.email
+          value: rpi4@internal.com
+
+      - name: Setup repo name
+        community.general.git_config:
+          scope: local
+          repo: "{{ ha_dir }}"
+          name: user.name
+          value: RPI 4 HA
+
+      - name: Setup ssh command
+        community.general.git_config:
+          scope: local
+          repo: "{{ ha_dir }}"
+          name: core.sshCommand
+          value: "ssh -i {{ ha_dir }}/.ssh/ha-github -F /dev/null"
+
+      # Doing this using git_config resulted in the refs line being missing. This meant git fetch found nothing
+      - name: Setup remote origin url
+        community.general.git_config:
+          scope: local
+          repo: "{{ ha_dir }}"
+          name: 'remote.origin.url'
+          value: "{{ git_remote_url }}"
+
+      - name: Setup remote origin fetch
+        community.general.git_config:
+          scope: local
+          repo: "{{ ha_dir }}"
+          name: 'remote.origin.fetch'
+          value: '+refs/heads/*:refs/remotes/origin/*'
+      
+      - name: Git fetch
+        command:
+          cmd: 'git fetch origin'
+          chdir: "{{ ha_dir }}"
+        when: not git_dir.stat.exists
+  
+  # Alternative is git pull --reset hard origin/master
+  - name: Git pull origin master
+    ansible.builtin.git:
+      repo: "{{ git_remote_url }}"
+      dest: "{{ ha_dir }}"
+      force: yes
+      accept_hostkey: yes
+
+

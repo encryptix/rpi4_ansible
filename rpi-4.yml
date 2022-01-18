@@ -1,0 +1,34 @@
+# ansible-playbook rpi-4.yml -v -i hosts
+- name: Initial Prompt
+  import_playbook: initial_rpi_prompt.yml
+    
+- name: Initial PI OS Setup
+  import_playbook: initial_rpi_os_setup.yml
+  vars:
+    rpi_hostname: <hostname>
+    vnc_headless_size: 1024x768
+    locale: <locale>
+
+- name: Docker Setup
+  import_playbook: docker_setup.yml
+  vars:
+    docker_compose: true
+    docker_users:
+      - <user>
+
+- name: Initial HA Setup
+  import_playbook: initial_home_assistant.yml
+  vars:
+    rpi_hostname: <hostname>
+    wifi_ssid: <wifi_name>
+    wifi_password: <wifi_pass>
+    ha_machine_type: raspberrypi4
+    hdmi_power: false
+
+- hosts: all
+  tasks:
+  - name: Congratulations!
+    debug:
+      msg:
+        - "Your Raspi is ready now!"
+  
