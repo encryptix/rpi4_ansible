@@ -10,7 +10,7 @@
     wifi_password: Set_Me_Pass
     network_manager_conf_d_dir: /etc/NetworkManager/conf.d
     network_manager_connections_dir: /etc/NetworkManager/system-connections
- 
+
   tasks:
   - debug:
       msg: "Files dir in home_assistant is {{ files_dir }}. Templates dir is {{ templates_dir }}"
@@ -84,7 +84,7 @@
     vars:
       wifi_name: "{{ wifi_ssid }}"
       wifi_pass: "{{ wifi_password }}"
- 
+
   - pause:
       prompt: "Configure Networkmanager wifi after package install)"
 
@@ -103,7 +103,7 @@
   - name: Sleep for 30 seconds and continue with play
     wait_for:
       timeout: 30
-  
+
   - name: Install network manager again (backup call)
     package:
       name: "{{ item }}"
@@ -168,18 +168,18 @@
       dest: "{{ deb_files_dir }}"
     with_fileglob:
       - "{{ files_dir }}/homeassistant-supervised_1.0.2.deb"
-   
+
   - name: Install os-agent
     become: yes
-    become_user: root  
+    become_user: root
     apt:
       deb: "{{ deb_files_dir }}/os-agent_1.2.2_linux_armv7.deb"
     register: ha_os_agent_install
- 
+
   - debug:
       msg: "{{ha_os_agent_install.stdout_lines}}"
 
-  # Current rpm install fails. 
+  # Current rpm install fails.
   # Manually install rpm with dpkg and then manually run postinst script
   # Save this file (https://raw.githubusercontent.com/home-assistant/supervised-installer/1.0.2/homeassistant-supervised/DEBIAN/postinst) after putting some sleeps in to wait for network/dns for docker to run
   # /etc/hassio.json had OK in for machine type...Should have been raspberrypi4 so I updated that.
@@ -189,18 +189,18 @@
   # Maybe in the future it just works and the above isnt needed..
   #- name: Install HA Supervisor
   #  become: yes
-  #  become_user: root  
+  #  become_user: root
   #  apt:
   #    deb: https://github.com/home-assistant/supervised-installer/releases/latest/download/homeassistant-supervised.deb
   #  register: ha_supervisor_install
 
   #- debug:
   #    msg: "{{ha_supervisor_install.stdout_lines}}"
-  
+
   # Need to be careful to delete the image in docker ps -a or the new params wont take hold. This is an issue if the params were wrong...
   # sudo service hassio-supervisor stop
   # docker stop hassio_supervisor
-  # docker rm hassio_supervisor 
+  # docker rm hassio_supervisor
   # sudo service hassio-supervisor start
   - name: "Ensure /etc/hassio.json has correct machine type {{ ha_machine_type }}. Read comments at this task upon failure."
     lineinfile:
@@ -248,15 +248,23 @@
           name: pa-suspend
           enabled: yes
           state: started
-      
+
       - name: Collect facts about system services
         service_facts:
         register: services_state
         no_log: true
-        
+
       - debug:
           msg: "{{ services_state['ansible_facts']['services']['pa-suspend.service'] }}"
-          
+
+      - name: Copy HA Backup Decryptor tool
+        copy:
+          src: "{{ files_dir }}/ha_backup_decryptor.py"
+          dest: /home/pi/Scripts/ha_backup_decryptor.py
+          owner: pi
+          group: pi
+          mode: '0744'
+
   handlers:
   - name: Reboot Pi
     reboot:
