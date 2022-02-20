@@ -33,7 +33,9 @@
   - name: "Update hostname to {{ rpi_hostname }}"
     hostname: 
       name: "{{ rpi_hostname }}"
-      use: debian
+      # Not working for now
+      # https://github.com/ansible/ansible/pull/76929
+      # use: debian
     notify:
     - Reboot Pi
 
@@ -69,12 +71,17 @@
 
   - name: Get current locale
     set_fact:
-      current_locale: "{{ ansible_env['LC_ALL'] }}"
+      current_locale: "{{ ansible_env['LC_ALL'] | default('') }}"
+  
+  - name: Display Current Locale
+    debug:
+      msg: "{{ current_locale }}"
 
   - name: "Set locale Replacing: {{ current_locale }}"
     command: "update-locale {{ locale }} UTF-8"
     register: locale
     when: current_locale != locale
+    # disabled because it doesn't always work, something changes current_locale
     #notify:
     #- Reboot Pi
 
