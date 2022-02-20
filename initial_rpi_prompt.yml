@@ -1,6 +1,6 @@
 - name: "Initial RPI Prompt"
-  hosts: all
+  hosts: localhost
 
-  tasks:      
+  tasks:
   - pause:
-      prompt: "Perform first boot of pi. Set locale,connect to wifi/ethernet. Configure SSH to be enabled (raspbi-config) and add public key to authorized. Give static IP if required. Reboot."
+      prompt: "Perform first boot of pi. Set locale,connect to wifi/ethernet. Configure SSH to be enabled (raspi-config) and add public key to authorized. Give static IP if required. Reboot."
